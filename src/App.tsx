@@ -881,6 +881,17 @@ export default function App() {
   void _setFeatureMatrixOpen;
   void _glossaryOpen;
   void _setGlossaryOpen;
+  void TOKENS_RUST_EXAMPLE;
+  void limitsAdvancedValues;
+  void coverageAdvancedValues;
+  void tokensFaqOpen;
+  void setTokensFaqOpen;
+  void tokensExampleCopied;
+  void setTokensExampleCopied;
+  void eventsFaqOpen;
+  void setEventsFaqOpen;
+  void eventsQuickStartOpen;
+  void setEventsQuickStartOpen;
 
   useEffect(() => {
     document.documentElement.style.scrollPaddingTop = "78px";
@@ -935,16 +946,26 @@ export default function App() {
   const generated = useMemo(() => buildCommand(options), [options]);
   const generatedRef = useRef(generated);
 
+  // #329 — Expected behavior: coverage's preflight checklist starts unchecked,
+  // which is not a valid state for generating a command. Keep the live preview
+  // available, but flag the invalid default beside the output until every item
+  // is confirmed. Other workflows have no coverage preflight, so they are silent.
+  const coveragePreflightIncomplete =
+    command === "coverage" &&
+    coveragePreflight.some((item) => !checkedCoveragePreflight[item.id]);
+
   useEffect(() => {
     generatedRef.current = generated;
   }, [generated]);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setCopied(false);
     setCopiedWithComments(false);
     setCopiedAsScript(false);
     setAnnouncement("");
   }, [command]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const toggleAdvancedEditor = () => {
     if (multilineEditor) {
@@ -1120,6 +1141,7 @@ export default function App() {
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
       setCopied(true);
+      setValidationError("");
       setAnnouncement("Command copied to clipboard");
       window.setTimeout(() => {
         setCopied(false);
@@ -1139,6 +1161,7 @@ export default function App() {
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
       setCopiedWithComments(true);
+      setValidationError("");
       setAnnouncement("Command with comments copied to clipboard");
       window.setTimeout(() => {
         setCopiedWithComments(false);
@@ -1158,6 +1181,7 @@ export default function App() {
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
       setCopiedAsScript(true);
+      setValidationError("");
       setAnnouncement("Shell script copied to clipboard");
       window.setTimeout(() => {
         setCopiedAsScript(false);
@@ -1172,6 +1196,7 @@ export default function App() {
     try {
       await copyToClipboard(stepCommand);
       setCopiedStep(index);
+      setValidationError("");
       setAnnouncement(`Step ${index + 1} command copied to clipboard`);
       window.setTimeout(() => {
         setCopiedStep(null);
@@ -1186,6 +1211,7 @@ export default function App() {
     try {
       await copyToClipboard(exampleCode);
       setCopiedModuleExample(moduleName);
+      setValidationError("");
       setAnnouncement(`${moduleName} module Rust example copied to clipboard`);
       window.setTimeout(() => {
         setCopiedModuleExample(null);
@@ -2614,6 +2640,12 @@ export default function App() {
             )}
           </section>
 
+          {coveragePreflightIncomplete && (
+            <p id="coverage-preflight-validation" className="validation-hint" aria-live="polite">
+              Coverage preflight checklist is still at its unchecked default. Confirm every item before generating a command.
+            </p>
+          )}
+
           <div
             className="output"
             role="region"
@@ -2623,20 +2655,31 @@ export default function App() {
             <span id="command-output-desc" className="sr-only">
               Copy this command to your terminal to run the selected workflow.
             </span>
-          <div className="output" role="region" aria-label="Generated CLI command">
-            <div
-              className="sr-only"
-              aria-live="polite"
-              data-testid="generated-command-sr-summary"
-            >
-              Active generated command: {generated}
+            <div className="output" role="region" aria-label="Generated CLI command">
+              <div
+                className="sr-only"
+                aria-live="polite"
+                data-testid="generated-command-sr-summary"
+              >
+                Active generated command: {generated}
+              </div>
+              <code data-testid="command-output">{highlightCommand(generated)}</code>
+              <button
+                onClick={validateAndCopy}
+                aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+              {/* #146 — download action for generated shell script */}
+              <button
+                onClick={downloadCommand}
+                className="button-download"
+                aria-label="Download command as shell script"
+                aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
+              >
+                Download
+              </button>
             </div>
-            <code data-testid="command-output">{highlightCommand(generated)}</code>
-            <button onClick={validateAndCopy}>{copied ? "Copied" : "Copy"}</button>
-            {/* #146 — download action for generated shell script */}
-            <button onClick={downloadCommand} className="button-download" aria-label="Download command as shell script">
-              Download
-            </button>
           </div>
 
           {/* Issue #144 & #145: Additional copy options */}
@@ -2646,6 +2689,7 @@ export default function App() {
               className="button secondary" 
               onClick={copyWithComments}
               aria-label="Copy command with explanatory comments"
+              aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
             >
               {copiedWithComments ? "Copied with comments" : "Copy with comments"}
             </button>
@@ -2654,6 +2698,7 @@ export default function App() {
               className="button secondary" 
               onClick={copyAsScript}
               aria-label="Copy as shell script"
+              aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
             >
               {copiedAsScript ? "Script copied" : "Copy as script"}
             </button>
@@ -2688,6 +2733,7 @@ export default function App() {
                           onClick={async () => {
                             try {
                               await copyToClipboard(cmd);
+                              setValidationError("");
                               setAnnouncement(`History command ${commandHistory.length - index} copied`);
                               window.setTimeout(() => setAnnouncement(""), 1600);
                             } catch {

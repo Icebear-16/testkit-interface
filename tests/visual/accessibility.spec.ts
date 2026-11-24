@@ -196,3 +196,63 @@ test.describe("focus return (#111)", () => {
     });
   }
 });
+
+// Issue #330 — DOM/tab order must match the visual left-to-right switcher order
+test.describe("workflow switcher order (#330)", () => {
+  for (const width of [1280, 900, 640, 540, 320]) {
+    test(`keeps command and workflow tabs in reading order at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+
+      const switchers = [
+        '[role="group"][aria-label="Command workflow selector"] > button',
+        '[role="tablist"][aria-label="Soroban workflow docs"] > button',
+      ];
+
+      for (const selector of switchers) {
+        const boxes = await page.locator(selector).evaluateAll((elements) =>
+          elements.map((element) => {
+            const { x, y } = element.getBoundingClientRect();
+            return { x, y };
+          }),
+        );
+
+        expect(boxes.length).toBeGreaterThan(1);
+        for (let index = 1; index < boxes.length; index += 1) {
+          const previous = boxes[index - 1];
+          const current = boxes[index];
+          if (Math.abs(current.y - previous.y) < 4) {
+            expect(current.x, `${selector} must flow left-to-right`).toBeGreaterThan(previous.x);
+          } else {
+            expect(current.y, `${selector} must wrap top-to-bottom`).toBeGreaterThan(previous.y);
+          }
+        }
+      }
+    });
+  }
+});
+
+// Issue #331 — portrait phone module list tap targets
+test.describe("portrait phone tap targets (#331)", () => {
+  for (const width of [539, 375, 320]) {
+    test(`gives module list controls at least 44px at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/");
+      await page.getByRole("searchbox", { name: /search modules by name or description/i }).fill("core");
+
+      const offenders = await page.evaluate(() => {
+        const selector = ".module-filter-clear, .category-chip, .module-card-select, .module-card-links a";
+        return Array.from(document.querySelectorAll<HTMLElement>(selector))
+          .filter((element) => element.getBoundingClientRect().width > 0)
+          .map((element) => ({
+            label: (element.getAttribute("aria-label") || element.textContent || "").trim().slice(0, 40),
+            width: element.getBoundingClientRect().width,
+            height: element.getBoundingClientRect().height,
+          }))
+          .filter((box) => box.width < 44 || box.height < 44);
+      });
+
+      expect(offenders).toEqual([]);
+    });
+  }
+});

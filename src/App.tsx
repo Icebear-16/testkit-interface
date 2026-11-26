@@ -1446,7 +1446,7 @@ export default function App() {
   // heading focus that a workflow switch also triggers.
   useEffect(() => {
     if (limitsOutputFocusRequest === 0) return;
-    const panel = auditOutputPanelRef.current;
+    const panel = commandOutputPanelRef.current;
     if (!panel) return;
     panel.focus();
     if (typeof panel.scrollIntoView === "function") {
@@ -1459,7 +1459,7 @@ export default function App() {
   // necessary, then focuses and scrolls the shared generated-output region.
   useEffect(() => {
     if (coverageOutputFocusRequest === 0) return;
-    const panel = auditOutputPanelRef.current;
+    const panel = commandOutputPanelRef.current;
     if (!panel) return;
     panel.focus();
     if (typeof panel.scrollIntoView === "function") {
@@ -3056,23 +3056,6 @@ export default function App() {
               </div>
             )}
           </section>
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => {
-                      // Clear unmounts its focused button; return to the persistent Copy action.
-                      copyButtonRef.current?.focus();
-                      setCommandHistory([]);
-                      setAnnouncement("Command history cleared");
-                      window.setTimeout(() => setAnnouncement(""), 1600);
-                    }}
-                  >
-                    Clear history
-                  </button>
-                )}
-              </div>
-            )}
-          </section>
 
           <div className="advanced-command-block">
             <button
@@ -3136,6 +3119,7 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
 
         {compareOpen && configB && (
           <section

@@ -395,11 +395,14 @@ describe("Reset behavior after customized inputs (#205)", () => {
     render(<App />);
 
     const pathInput = screen.getByLabelText("Project or contract path") as HTMLInputElement;
-    const formatSelect = screen.getByLabelText(/report format/i) as HTMLSelectElement;
+    // #324 replaced the format <select> with an accessible radio group.
+    const formatGroup = screen.getByRole("radiogroup", { name: "Report format" });
+    const htmlRadio = within(formatGroup).getByRole("radio", { name: "html" }) as HTMLInputElement;
+    const lcovRadio = within(formatGroup).getByRole("radio", { name: "lcov" }) as HTMLInputElement;
     const openCheckbox = screen.getByLabelText(/open report when complete/i) as HTMLInputElement;
 
     fireEvent.change(pathInput, { target: { value: "./contracts/escrow" } });
-    fireEvent.change(formatSelect, { target: { value: "lcov" } });
+    fireEvent.click(lcovRadio);
     fireEvent.click(openCheckbox); // uncheck
 
     expect(screen.getByTestId("command-output")).toHaveTextContent(
@@ -410,7 +413,8 @@ describe("Reset behavior after customized inputs (#205)", () => {
     fireEvent.click(resetButton);
 
     expect(pathInput.value).toBe(".");
-    expect(formatSelect.value).toBe("html");
+    expect(htmlRadio.checked).toBe(true);
+    expect(lcovRadio.checked).toBe(false);
     expect(openCheckbox.checked).toBe(true);
     expect(screen.getByTestId("command-output")).toHaveTextContent(
       "soroban-testkit coverage . --format html --open",
@@ -1750,9 +1754,14 @@ describe("Session-only command history UI", () => {
     fireEvent.click(screen.getByRole("button", { name: /show \(1\)/i }));
     fireEvent.click(screen.getByRole("button", { name: /clear history/i }));
     
+    // #348 keeps the Command history section mounted after the last entry is
+    // cleared, so the empty state replaces the entries instead of the heading.
     await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: /command history/i })).not.toBeInTheDocument();
+      expect(
+        screen.getByText("No commands yet. Copy a generated command to add it to this session history."),
+      ).toBeVisible();
     });
+    expect(screen.getByRole("button", { name: "Hide (0)" })).toBeInTheDocument();
   });
 });
 
@@ -1774,7 +1783,7 @@ describe("Command history keyboard focus (#343)", () => {
       configurable: true,
     });
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^Copy$/ }));
     return screen.findByRole("button", { name: "Show (1)" });
   }
 
@@ -1807,7 +1816,9 @@ describe("Command history keyboard focus (#343)", () => {
     const clear = screen.getByRole("button", { name: "Clear history" });
     clear.focus();
     fireEvent.click(clear);
-    expect(screen.queryByRole("heading", { name: "Command history" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("No commands yet. Copy a generated command to add it to this session history."),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "Copied" })).toHaveFocus();
   });
 });
@@ -2902,5 +2913,113 @@ describe("Assigned command-builder regressions (#346, #348, #351)", () => {
 
     expect(screen.getByText("36 characters · 2 lines")).toBeVisible();
     expect(editor).toHaveAttribute("aria-describedby", "audit-editor-count");
+  });
+});
+
+// #358 — restoring a remembered command must not be blocked by, or reset, an
+// active module search filter.
+describe("Command history restore with an active module filter (#358)", () => {
+  const originalClipboard = navigator.clipboard;
+
+  afterEach(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  function mockClipboard() {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    return writeText;
+  }
+
+  it("restores the remembered workflow while keeping the current module filter", async () => {
+    const writeText = mockClipboard();
+    render(<App />);
+
+    // Record a non-default Limits configuration in the command history.
+    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Project or contract path" }), {
+      target: { value: "./contracts/vault" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Function" }), {
+      target: { value: "withdraw" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ramp parameter" }), {
+      target: { value: "amount" },
+    });
+    const rememberedCommand =
+      "soroban-testkit limits --contract ./contracts/vault --fn withdraw --ramp amount";
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(rememberedCommand));
+
+    // Filter the module library down to the module related to that workflow,
+    // then move the builder to a different workflow.
+    const filterInput = screen.getByLabelText("Search modules by name or description");
+    fireEvent.change(filterInput, { target: { value: "tokens" } });
+    expect(screen.getByRole("heading", { name: "tokens", level: 3 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "money", level: 3 })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "coverage" }));
+    expect(screen.getByTestId("command-output")).toHaveTextContent("soroban-testkit coverage");
+
+    const restore = screen.getByRole("button", { name: "Restore previous command" });
+    await waitFor(() => expect(restore).toBeEnabled());
+    fireEvent.click(restore);
+
+    // The remembered workflow is restored in the builder ...
+    expect(screen.getByRole("button", { name: "limits" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "coverage" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("command-output")).toHaveTextContent(rememberedCommand);
+    expect(screen.getByText("Previous command restored")).toBeInTheDocument();
+    expect(restore).toHaveTextContent("Restore previous (0)");
+
+    // ... while the module filter still applies and is not reset by the restore.
+    expect(filterInput).toHaveValue("tokens");
+    expect(screen.getByRole("heading", { name: "tokens", level: 3 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "money", level: 3 })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open the limits workflow related to tokens" }),
+    ).toHaveAttribute("href", "#commands");
+  });
+
+  it("restores the remembered workflow even when the filter matches no modules", async () => {
+    const writeText = mockClipboard();
+    render(<App />);
+
+    // Remember an Audit command with strict mode turned off.
+    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /fail on warnings/i }));
+    const rememberedCommand = "soroban-testkit audit .";
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(rememberedCommand));
+
+    // An active filter that hides every module card must not hide the builder
+    // or stop a restore from applying the remembered workflow.
+    const filterInput = screen.getByLabelText("Search modules by name or description");
+    fireEvent.change(filterInput, { target: { value: "nonexistent-module" } });
+    expect(screen.getByRole("heading", { name: /No modules match/ })).toBeInTheDocument();
+    expect(document.getElementById("module-grid")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    const restore = screen.getByRole("button", { name: "Restore previous command" });
+    await waitFor(() => expect(restore).toBeEnabled());
+    fireEvent.click(restore);
+
+    expect(screen.getByRole("button", { name: "audit" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "limits" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("command-output")).toBeVisible();
+    expect(screen.getByTestId("command-output")).toHaveTextContent(rememberedCommand);
+    expect(restore).toHaveTextContent("Restore previous (0)");
+
+    // The empty filter state is preserved rather than cleared by the restore.
+    expect(filterInput).toHaveValue("nonexistent-module");
+    expect(screen.getByRole("heading", { name: /No modules match/ })).toBeInTheDocument();
+    expect(document.getElementById("module-grid")).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import {
   installationSteps,
   localFileGuides,
   summarizeConfiguration,
+  validateConfiguration,
   type CommandOptions,
 } from "./testkit";
 
@@ -57,6 +58,146 @@ describe("buildCommand", () => {
   it("quotes a path with multiple spaces as a single argument", () => {
     expect(buildCommand({ command: "audit", path: "./a b c", format: "text", open: false, fn: "", ramp: "", strict: false }))
       .toBe('soroban-testkit audit "./a b c"');
+  });
+});
+
+// #21 — quote values containing tabs and line breaks, not just spaces
+describe("buildCommand quoting values with tabs and line breaks (#21)", () => {
+  const withOptions = (overrides: Partial<CommandOptions>): CommandOptions => ({
+    command: "coverage",
+    path: ".",
+    format: "html",
+    open: false,
+    fn: "",
+    ramp: "",
+    strict: false,
+    ...overrides,
+  });
+
+  it("quotes a coverage path containing a tab", () => {
+    expect(buildCommand(withOptions({ path: "./my\tcontract" })))
+      .toBe('soroban-testkit coverage "./my\tcontract" --format html');
+  });
+
+  it("quotes a coverage path containing a line break", () => {
+    expect(buildCommand(withOptions({ path: "./my\ncontract" })))
+      .toBe('soroban-testkit coverage "./my\ncontract" --format html');
+  });
+
+  it("quotes an audit path containing a carriage return", () => {
+    expect(buildCommand(withOptions({ command: "audit", path: "./a\rb" })))
+      .toBe('soroban-testkit audit "./a\rb"');
+  });
+
+  it("quotes a limits --contract path containing a tab and line break", () => {
+    expect(
+      buildCommand(
+        withOptions({
+          command: "limits",
+          path: "./a\tb\nc.wasm",
+          fn: "batch_payout",
+          ramp: "recipients",
+        }),
+      ),
+    ).toBe('soroban-testkit limits --contract "./a\tb\nc.wasm" --fn batch_payout --ramp recipients');
+  });
+
+  it("keeps values without whitespace unquoted", () => {
+    expect(buildCommand(withOptions({ path: "./contracts/escrow" })))
+      .toBe("soroban-testkit coverage ./contracts/escrow --format html");
+  });
+
+  it("preserves the quoting in multi-line and commented formats", () => {
+    const limits = withOptions({
+      command: "limits",
+      path: "./a\tb.wasm",
+      fn: "batch_payout",
+      ramp: "recipients",
+    });
+
+    expect(formatCommandLine(limits, true)).toContain('--contract "./a\tb.wasm"');
+    expect(formatCommandWithComments(limits)).toContain('"./a\tb.wasm"');
+  });
+});
+
+// #22 — a path made up only of whitespace behaves the same as an empty path
+describe("Whitespace-only project paths (#22)", () => {
+  const withOptions = (overrides: Partial<CommandOptions>): CommandOptions => ({
+    command: "coverage",
+    path: "   ",
+    format: "html",
+    open: false,
+    fn: "",
+    ramp: "",
+    strict: false,
+    ...overrides,
+  });
+
+  it("omits a whitespace-only coverage path like an empty one", () => {
+    expect(buildCommand(withOptions({ path: "" })))
+      .toBe("soroban-testkit coverage --format html");
+    expect(buildCommand(withOptions({ path: "   " })))
+      .toBe("soroban-testkit coverage --format html");
+  });
+
+  it("falls back to the default contract for a whitespace-only limits path", () => {
+    expect(buildCommand(withOptions({ command: "limits", path: "\t \n" })))
+      .toBe("soroban-testkit limits --contract target/wasm32v1-none/release/contract.wasm --fn batch_payout --ramp recipients");
+  });
+
+  it("falls back to the default source dir for a whitespace-only audit path", () => {
+    expect(buildCommand(withOptions({ command: "audit", path: "   " })))
+      .toBe("soroban-testkit audit ./src");
+  });
+
+  it("treats a whitespace-only path as omitted in the summary", () => {
+    expect(summarizeConfiguration(withOptions({ path: "   " }))[0])
+      .toEqual({ label: "Project or contract path", value: "(omitted)" });
+    expect(summarizeConfiguration(withOptions({ command: "limits", path: "   " }))[0])
+      .toEqual({ label: "Contract artifact", value: "target/wasm32v1-none/release/contract.wasm (default)" });
+    expect(summarizeConfiguration(withOptions({ command: "audit", path: "   " }))[0])
+      .toEqual({ label: "Project path", value: "./src (default)" });
+  });
+
+  it("marks the default as applied for a whitespace-only path", () => {
+    expect(effectiveDefaults(withOptions({ command: "limits", path: "   " }))[0])
+      .toMatchObject({ value: "target/wasm32v1-none/release/contract.wasm", applied: true });
+    expect(effectiveDefaults(withOptions({ command: "audit", path: "   " }))[0])
+      .toMatchObject({ value: "./src", applied: true });
+  });
+
+  it("reads a whitespace-only path as empty in the comparison", () => {
+    const row = compareConfigurations(
+      withOptions({ path: "   " }),
+      withOptions({ path: "./contracts" }),
+    ).find((entry) => entry.key === "path");
+    expect(row?.a).toBe("(empty)");
+    expect(row?.b).toBe("./contracts");
+  });
+
+  it("substitutes the default script variables for a whitespace-only path", () => {
+    expect(formatCommandAsScript(withOptions({ path: "   " })))
+      .toContain('PROJECT_PATH="."');
+    expect(formatCommandAsScript(withOptions({ command: "limits", path: "   " })))
+      .toContain('CONTRACT="target/wasm32v1-none/release/contract.wasm"');
+    expect(formatCommandAsScript(withOptions({ command: "audit", path: "   " })))
+      .toContain('SOURCE_PATH="./src"');
+  });
+
+  it("warns about a whitespace-only path during validation", () => {
+    const result = validateConfiguration({
+      options: { command: "coverage", path: "   ", format: "html", open: false, fn: "", ramp: "", strict: false },
+    });
+    expect(result.warnings).toContain("path is not set; default values will be used");
+  });
+
+  it("still uses a real path in every workflow", () => {
+    expect(buildCommand(withOptions({ path: "./contracts/escrow" })))
+      .toBe("soroban-testkit coverage ./contracts/escrow --format html");
+    expect(buildCommand(withOptions({ command: "limits", path: "./a.wasm" })))
+      .toBe("soroban-testkit limits --contract ./a.wasm --fn batch_payout --ramp recipients");
+    expect(buildCommand(withOptions({ command: "audit", path: "./src" })))
+      .toBe("soroban-testkit audit ./src");
   });
 });
 

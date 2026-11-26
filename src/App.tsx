@@ -981,12 +981,14 @@ export default function App() {
 
   // Reset transient copy feedback in the same event that switches workflows.
   // Avoid cascading state updates from an effect watching command.
+  // #20 — announce which command is now active so screen-reader users hear the
+  // switch instead of relying on the button label or a silent input reset.
   const changeCommand = (next: CommandName) => {
     setCommand(next);
     setCopied(false);
     setCopiedCommentsMode(null);
     setCopiedAsScript(false);
-    setAnnouncement("");
+    setAnnouncement(`Active command: ${next}`);
   };
 
   const options = useMemo<CommandOptions>(

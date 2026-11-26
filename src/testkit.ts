@@ -285,7 +285,7 @@ export function formatCommandWithComments(options: CommandOptions): string {
         comments.push(`  ${arg}${isLast ? "" : " \\"}`);
       }
     });
-    if (optionalArgs.length === 0 && options.path) {
+    if (optionalArgs.length === 0 && hasPath(options.path)) {
       comments[comments.length - 1] = comments[comments.length - 1].replace(" \\", "");
     }
   } else if (options.command === "limits") {
@@ -474,7 +474,7 @@ export function validateConfiguration(data: unknown): ValidationResult {
   }
 
   // Warnings for missing optional fields
-  if (!options.path) {
+  if (typeof options.path !== "string" || !hasPath(options.path)) {
     warnings.push("path is not set; default values will be used");
   }
 
@@ -533,8 +533,8 @@ export function effectiveDefaults(options: CommandOptions): EffectiveDefaultRow[
         key: "path",
         label: "Contract artifact",
         input: options.path,
-        value: options.path || fallbackValues.limitsContract,
-        applied: options.path === "",
+        value: hasPath(options.path) ? options.path : fallbackValues.limitsContract,
+        applied: !hasPath(options.path),
       },
       {
         key: "fn",
@@ -559,8 +559,8 @@ export function effectiveDefaults(options: CommandOptions): EffectiveDefaultRow[
         key: "path",
         label: "Project path",
         input: options.path,
-        value: options.path || fallbackValues.auditPath,
-        applied: options.path === "",
+        value: hasPath(options.path) ? options.path : fallbackValues.auditPath,
+        applied: !hasPath(options.path),
       },
     ];
   }
@@ -582,7 +582,7 @@ export function summarizeConfiguration(
 ): SettingSummaryRow[] {
   if (options.command === "coverage") {
     return [
-      { label: "Project or contract path", value: options.path || "(omitted)" },
+      { label: "Project or contract path", value: hasPath(options.path) ? options.path : "(omitted)" },
       { label: "Report format", value: options.format },
       { label: "Open report when complete", value: options.format === "html" && options.open ? "On" : "Off" },
     ];
@@ -592,7 +592,7 @@ export function summarizeConfiguration(
     return [
       {
         label: "Contract artifact",
-        value: options.path || `${fallbackValues.limitsContract} (default)`,
+        value: hasPath(options.path) ? options.path : `${fallbackValues.limitsContract} (default)`,
       },
       {
         label: "Function",
@@ -608,7 +608,7 @@ export function summarizeConfiguration(
   return [
     {
       label: "Project path",
-      value: options.path || `${fallbackValues.auditPath} (default)`,
+      value: hasPath(options.path) ? options.path : `${fallbackValues.auditPath} (default)`,
     },
     { label: "Fail on warnings", value: options.strict ? "On" : "Off" },
   ];
@@ -646,7 +646,7 @@ export function compareConfigurations(
       key: "path",
       label: "Project or contract path",
       applicable: true,
-      value: (o) => o.path || "(empty)",
+      value: (o) => (hasPath(o.path) ? o.path : "(empty)"),
     },
     {
       key: "format",

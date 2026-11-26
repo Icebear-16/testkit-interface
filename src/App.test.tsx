@@ -196,6 +196,203 @@ describe("Coverage option combinations component tests (#200)", () => {
   });
 });
 
+// #21 — values containing tabs or line breaks must be quoted in the generated command
+describe("Generated command quoting for tabs and line breaks (#21)", () => {
+  it("quotes a coverage path containing a tab", () => {
+    render(<App />);
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "./my\tcontract" } });
+
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      'soroban-testkit coverage "./my\tcontract" --format html --open',
+    );
+  });
+
+  it("quotes an audit path containing a tab and preserves the strict flag", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "./src\tpkg" } });
+
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      'soroban-testkit audit "./src\tpkg" --strict',
+    );
+  });
+});
+
+// #22 — a path made up only of whitespace must behave like an empty path everywhere
+describe("Whitespace-only project paths (#22)", () => {
+  it("omits a whitespace-only coverage path from the generated command", () => {
+    render(<App />);
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "   " } });
+
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit coverage --format html --open",
+    );
+  });
+
+  it("falls back to the default contract for a whitespace-only limits path", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "\t \n" } });
+
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit limits --contract target/wasm32v1-none/release/contract.wasm --fn batch_payout --ramp recipients",
+    );
+  });
+
+  it("falls back to the default source dir for a whitespace-only audit path and keeps strict mode", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "   " } });
+
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit audit ./src --strict",
+    );
+  });
+
+  it("still emits a real path in every workflow", () => {
+    render(<App />);
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "./contracts/escrow" } });
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit coverage ./contracts/escrow --format html --open",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.change(pathInput, { target: { value: "./a.wasm" } });
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit limits --contract ./a.wasm --fn batch_payout --ramp recipients",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.change(pathInput, { target: { value: "./src" } });
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit audit ./src --strict",
+    );
+  });
+});
+
+// #23 — stale "Copied" feedback must clear as soon as a command input changes
+describe("Clearing stale copy feedback on input changes (#23)", () => {
+  const originalClipboard = navigator.clipboard;
+
+  beforeEach(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("clears the Copied label when the coverage path changes", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
+    );
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "./contracts" } });
+
+    expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    // The generated command still reflects the edited input.
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit coverage ./contracts --format html --open",
+    );
+  });
+
+  it("clears the Copied label when a coverage option toggles", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByLabelText(/open report when complete/i));
+
+    expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit coverage . --format html",
+    );
+  });
+
+  it("clears the copy-with-comments label when an input changes", async () => {
+    render(<App />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy command with explanatory comments" }),
+    );
+    await waitFor(() => expect(screen.getByText("Copied with comments")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("radio", { name: "lcov" }));
+
+    expect(screen.queryByText("Copied with comments")).not.toBeInTheDocument();
+    expect(screen.getByText("Copy with comments")).toBeInTheDocument();
+  });
+
+  it("clears the script-copied label when an input changes", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy as shell script" }));
+    await waitFor(() => expect(screen.getByText("Script copied")).toBeInTheDocument());
+
+    const pathInput = screen.getByRole("textbox", { name: "Project or contract path" });
+    fireEvent.change(pathInput, { target: { value: "./changed" } });
+
+    expect(screen.queryByText("Script copied")).not.toBeInTheDocument();
+    expect(screen.getByText("Copy as script")).toBeInTheDocument();
+  });
+
+  it("clears the Copied label when the limits and audit inputs change", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Function" }), {
+      target: { value: "transfer" },
+    });
+    expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit limits --contract . --fn transfer --ramp recipients",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByLabelText(/fail on warnings/i));
+    expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("command-output")).toHaveTextContent("soroban-testkit audit .");
+  });
+});
+
 describe("Limits option combinations component tests (#199)", () => {
   const originalClipboard = navigator.clipboard;
 

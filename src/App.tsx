@@ -1177,6 +1177,14 @@ export default function App() {
   const generated = useMemo(() => buildCommand(options), [options]);
   const generatedRef = useRef(generated);
 
+  // #329 — Expected behavior: coverage's preflight checklist starts unchecked,
+  // which is not a valid state for generating a command. Keep the live preview
+  // available, but flag the invalid default beside the output until every item
+  // is confirmed. Other workflows have no coverage preflight, so they are silent.
+  const coveragePreflightIncomplete =
+    command === "coverage" &&
+    coveragePreflight.some((item) => !checkedCoveragePreflight[item.id]);
+
   useEffect(() => {
     generatedRef.current = generated;
   }, [generated]);
@@ -3044,6 +3052,12 @@ export default function App() {
             )}
           </section>
 
+          {coveragePreflightIncomplete && (
+            <p id="coverage-preflight-validation" className="validation-hint" aria-live="polite">
+              Coverage preflight checklist is still at its unchecked default. Confirm every item before generating a command.
+            </p>
+          )}
+
           <div
             ref={commandOutputPanelRef}
             className="output"
@@ -3070,9 +3084,20 @@ export default function App() {
               <button type="button" className="button-reset" onClick={handleReset}>
                 Reset
               </button>
-              <button ref={copyButtonRef} onClick={validateAndCopy}>{copied ? "Copied" : "Copy"}</button>
+              <button
+                ref={copyButtonRef}
+                onClick={validateAndCopy}
+                aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
               {/* #146 — download action for generated shell script */}
-              <button onClick={downloadCommand} className="button-download" aria-label="Download command as shell script">
+              <button
+                onClick={downloadCommand}
+                className="button-download"
+                aria-label="Download command as shell script"
+                aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
+              >
                 Download
               </button>
             </div>
@@ -3108,6 +3133,7 @@ export default function App() {
                       ? "Copy command with explanatory comments"
                       : "Copy command without explanatory comments"
               }
+              aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
             >
               {copiedCommentsMode === "with"
                 ? "Copied with comments"
@@ -3122,6 +3148,7 @@ export default function App() {
               className="button secondary" 
               onClick={copyAsScript}
               aria-label="Copy as shell script"
+              aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
             >
               {copiedAsScript ? "Script copied" : "Copy as script"}
             </button>

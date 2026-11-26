@@ -2181,6 +2181,96 @@ describe("Validation errors announced via live region (#102)", () => {
   });
 });
 
+// Issue #332 — screen reader announcements for every clipboard action
+describe("Clipboard announcements for screen readers (#332)", () => {
+  const originalClipboard = navigator.clipboard;
+
+  afterEach(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("announces success for command, comment, script, step, and history copy actions", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    render(<App />);
+    const polite = document.querySelector('[aria-live="polite"]');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    });
+    expect(polite).toHaveTextContent("Command copied to clipboard");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy command with explanatory comments" }));
+    });
+    expect(polite).toHaveTextContent("Command with comments copied to clipboard");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy as shell script" }));
+    });
+    expect(polite).toHaveTextContent("Shell script copied to clipboard");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy step 1 command" }));
+    });
+    expect(polite).toHaveTextContent("Step 1 command copied to clipboard");
+
+    fireEvent.click(screen.getByRole("button", { name: /Show \(\d+\)/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy history command 1" }));
+    });
+    expect(polite).toHaveTextContent("History command 1 copied");
+  });
+
+  it("announces clipboard failures through the assertive live region", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    render(<App />);
+    const alert = document.querySelector('[aria-live="assertive"]');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    });
+    expect(alert).toHaveTextContent(/could not copy/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy command with explanatory comments" }));
+    });
+    expect(alert).toHaveTextContent(/could not copy/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy as shell script" }));
+    });
+    expect(alert).toHaveTextContent(/could not copy/i);
+  });
+
+  it("clears a stale clipboard error after a later successful copy", async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    render(<App />);
+    const alert = document.querySelector('[aria-live="assertive"]');
+
+    writeText.mockRejectedValueOnce(new Error("clipboard denied"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    });
+    expect(alert).toHaveTextContent(/could not copy/i);
+
+    writeText.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    });
+    expect(alert).toHaveTextContent("");
+  });
+});
+
 // Issue #103 — copied status persists long enough for assistive technology
 describe("Copied status persistence for assistive technology (#103)", () => {
   const originalClipboard = navigator.clipboard;
@@ -2512,6 +2602,64 @@ describe("Coverage workflow preflight checklist (#78)", () => {
         name: /llvm-tools-preview component is installed/i,
       })
     ).toBeInTheDocument();
+  });
+});
+
+// Issue #329 — validate the coverage preflight default before command generation
+describe("Coverage preflight validation feedback (#329)", () => {
+  it("warns while the checklist is at its unchecked default and clears once every item is confirmed", () => {
+    render(<App />);
+
+    const warning = screen.getByText(/coverage preflight checklist is still at its unchecked default/i);
+    expect(warning).toHaveAttribute("aria-live", "polite");
+    expect(warning).toHaveAttribute("id", "coverage-preflight-validation");
+    expect(screen.getByRole("button", { name: "Copy" })).toHaveAttribute(
+      "aria-describedby",
+      "coverage-preflight-validation",
+    );
+
+    const heading = screen.getByRole("heading", { name: /coverage workflow: preflight checklist/i });
+    const card = heading.closest("article") as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: /show checklist/i }));
+    within(card)
+      .getAllByRole("checkbox")
+      .forEach((checkbox) => fireEvent.click(checkbox));
+
+    expect(screen.queryByText(/coverage preflight checklist is still at its unchecked default/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy" })).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("does not show coverage preflight feedback for other workflows", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+
+    expect(screen.queryByText(/coverage preflight checklist is still at its unchecked default/i)).not.toBeInTheDocument();
+  });
+});
+
+// Issue #330 — workflow switcher order
+describe("Workflow switcher tab order (#330)", () => {
+  it("keeps both switchers in visual left-to-right order with the tab stop on the first tab", () => {
+    render(<App />);
+
+    const selector = screen.getByRole("group", { name: "Command workflow selector" });
+    expect(within(selector).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "coverage",
+      "limits",
+      "audit",
+    ]);
+
+    const tablist = screen.getByRole("tablist", { name: /soroban workflow docs/i });
+    const tabs = within(tablist).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      "Coverage workflow",
+      "Cargo workspace",
+      "Resource limits",
+    ]);
+    expect(tabs[0]).toHaveAttribute("tabindex", "0");
+    expect(tabs[1]).toHaveAttribute("tabindex", "-1");
+    expect(tabs[2]).toHaveAttribute("tabindex", "-1");
   });
 });
 

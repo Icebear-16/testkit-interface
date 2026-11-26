@@ -1010,6 +1010,14 @@ export default function App() {
   const generated = useMemo(() => buildCommand(options), [options]);
   const generatedRef = useRef(generated);
 
+  // #329 — Expected behavior: coverage's preflight checklist starts unchecked,
+  // which is not a valid state for generating a command. Keep the live preview
+  // available, but flag the invalid default beside the output until every item
+  // is confirmed. Other workflows have no coverage preflight, so they are silent.
+  const coveragePreflightIncomplete =
+    command === "coverage" &&
+    coveragePreflight.some((item) => !checkedCoveragePreflight[item.id]);
+
   useEffect(() => {
     generatedRef.current = generated;
   }, [generated]);
@@ -1024,7 +1032,6 @@ export default function App() {
       setValidationError("Could not load your saved comments preference. Comments will remain enabled for this visit.");
     }
   }, []);
-
 
   const handleReset = () => {
     setPath(".");
@@ -1240,6 +1247,7 @@ export default function App() {
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
       setCopied(true);
+      setValidationError("");
       setAnnouncement("Command copied to clipboard");
       window.setTimeout(() => {
         setCopied(false);
@@ -1263,6 +1271,7 @@ export default function App() {
       await copyToClipboard(commandToCopy);
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
+      setValidationError("");
       setCopiedCommentsMode(includeCommentsForCopy ? "with" : "without");
       setAnnouncement(
         includeCommentsForCopy
@@ -1296,6 +1305,7 @@ export default function App() {
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
       setCopiedAsScript(true);
+      setValidationError("");
       setAnnouncement("Shell script copied to clipboard");
       window.setTimeout(() => {
         setCopiedAsScript(false);
@@ -1310,6 +1320,7 @@ export default function App() {
     try {
       await copyToClipboard(stepCommand);
       setCopiedStep(index);
+      setValidationError("");
       setAnnouncement(`Step ${index + 1} command copied to clipboard`);
       window.setTimeout(() => {
         setCopiedStep(null);
@@ -1324,6 +1335,7 @@ export default function App() {
     try {
       await copyToClipboard(exampleCode);
       setCopiedModuleExample(moduleName);
+      setValidationError("");
       setAnnouncement(`${moduleName} module Rust example copied to clipboard`);
       window.setTimeout(() => {
         setCopiedModuleExample(null);
@@ -2903,6 +2915,12 @@ export default function App() {
             )}
           </section>
 
+          {coveragePreflightIncomplete && (
+            <p id="coverage-preflight-validation" className="validation-hint" aria-live="polite">
+              Coverage preflight checklist is still at its unchecked default. Confirm every item before generating a command.
+            </p>
+          )}
+
           <div
             ref={commandOutputPanelRef}
             className="output"
@@ -2929,9 +2947,20 @@ export default function App() {
               <button type="button" className="button-reset" onClick={handleReset}>
                 Reset
               </button>
-              <button ref={copyButtonRef} onClick={validateAndCopy}>{copied ? "Copied" : "Copy"}</button>
+              <button
+                ref={copyButtonRef}
+                onClick={validateAndCopy}
+                aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
               {/* #146 — download action for generated shell script */}
-              <button onClick={downloadCommand} className="button-download" aria-label="Download command as shell script">
+              <button
+                onClick={downloadCommand}
+                className="button-download"
+                aria-label="Download command as shell script"
+                aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
+              >
                 Download
               </button>
             </div>
@@ -2960,6 +2989,7 @@ export default function App() {
                       ? "Copy command with explanatory comments"
                       : "Copy command without explanatory comments"
               }
+              aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
             >
               {copiedCommentsMode === "with"
                 ? "Copied with comments"
@@ -2974,6 +3004,7 @@ export default function App() {
               className="button secondary" 
               onClick={copyAsScript}
               aria-label="Copy as shell script"
+              aria-describedby={coveragePreflightIncomplete ? "coverage-preflight-validation" : undefined}
             >
               {copiedAsScript ? "Script copied" : "Copy as script"}
             </button>
@@ -3027,6 +3058,7 @@ export default function App() {
                         onClick={async () => {
                           try {
                             await copyToClipboard(cmd);
+                            setValidationError("");
                             setAnnouncement(`History command ${commandHistory.length - index} copied`);
                             window.setTimeout(() => setAnnouncement(""), 1600);
                           } catch {
